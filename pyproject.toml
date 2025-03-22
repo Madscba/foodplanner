@@ -1,0 +1,32 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "foodplanning"
+version = "0.0.1"
+description = "A foodplanning project, where simple foodplans can be made at a good price and best on your dietary preferences."
+authors = [
+  { name = "mcba" },
+]
+
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    
+]
+requires-python = "~=3.10"
+
+
+[tool.ruff]
+line-length = 99
+src = ["foodplanning"]
+include = ["pyproject.toml", "foodplanning/**/*.py"]
+
+[tool.ruff.lint]
+extend-select = ["I"]  # Add import sorting
+
+[tool.ruff.lint.isort]
+known-first-party = ["foodplanning"]
+force-sort-within-sections = true
+
