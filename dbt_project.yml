@@ -11,32 +11,33 @@ seed-paths: ["seeds"]
 macro-paths: ["macros"]
 snapshot-paths: ["snapshots"]
 
+
 target-path: "target"  
 clean-targets:         
     - "target"
     - "dbt_modules"
 
 models:
-  snowflake_workshop:
-    bronze:
-      +database: bronze
+  foodplanner_workshop:
+    BRONZE:
+      database: BRONZE
       raw:
-        +schema: raw
-        +materialized: view
-        +snowflake_warehouse: pc_dbt_wh
+        schema: FOODPLANNER_RAW
+        materialized: table
+        snowflake_warehouse: pc_dbt_wh
     silver:
-      +database: silver
+      database: SILVER
       standardized:
-        +schema: standardized
-        +materialized: view
-        +snowflake_warehouse: pc_dbt_wh
-    gold:
-      +database: gold
-      marts:
-        +schema: marts
-        +materialized: table
-        +snowflake_warehouse: pc_dbt_wh_large
-    platinum:
-      +database: platinum
-      +materialized: table
-      +snowflake_warehouse: pc_dbt_wh_large
+        schema: FOODPLANNER
+        materialized: view
+        snowflake_warehouse: pc_dbt_wh
+    # gold:
+    #   +database: gold
+    #   marts:
+    #     +schema: marts
+    #     +materialized: table
+    #     +snowflake_warehouse: pc_dbt_wh_large
+    # platinum:
+    #   +database: platinum
+    #   +materialized: table
+    #   +snowflake_warehouse: pc_dbt_wh_large
