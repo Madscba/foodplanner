@@ -1,32 +1,84 @@
-[build-system]
-requires = ["flit_core >=3.2,<4"]
-build-backend = "flit_core.buildapi"
-
-[project]
-name = "foodplanning"
-version = "0.0.1"
+[tool.poetry]
+name = "foodplanner"
+version = "0.1.0"
 description = "A foodplanning project, where simple foodplans can be made at a good price and best on your dietary preferences."
-authors = [
-  { name = "mcba" },
-]
-
+authors = ["mcba"]
 readme = "README.md"
-classifiers = [
-    "Programming Language :: Python :: 3",
-    
-]
-requires-python = "~=3.10"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+numpy = "^1.26.4"
+ruff = "^0.3.2"
+pydantic = "^2.6.3"
+pandas = ">=1.3.0, <2.2"
+pre-commit = "^3.6.2"
+pytest = "^8.1.1"
+seaborn = "^0.13.2"
+colorlog = "^6.8.2"
+requests = "^2.31.0"
+joblib = "^1.4.2"
+faker = "^37.0.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
 
 
 [tool.ruff]
-line-length = 99
-src = ["foodplanning"]
-include = ["pyproject.toml", "foodplanning/**/*.py"]
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+    "scratch.py"
+]
+
+# Same as Black.
+line-length = 88
+
+per-file-ignores = {}
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.mccabe]
+# Unlike Flake8, default to a complexity level of 10.
+max-complexity = 10
+
+[tool.ruff.pydocstyle]
+# Use pep257-style docstrings.
+convention = "pep257"
+
+[tool.ruff.isort]
+force-single-line = true
+
+[tool.ruff.format]
+quote-style="preserve"
 
 [tool.ruff.lint]
-extend-select = ["I"]  # Add import sorting
+select = ["E", 'D', "F", "I"]
+ignore = [ "D401", "E501", "F811", "F841" ] #Add which rules to ignore ex. add "E701" to list.
 
-[tool.ruff.lint.isort]
-known-first-party = ["foodplanning"]
-force-sort-within-sections = true
+# Allow autofix for all enabled rules (when `--fix`) is provided.
+fixable = ["A", "B", "C", "D", "E", "F", "G", "I", "N", "Q", "S", "T", "W", "ANN", "ARG", "BLE", "COM", "DJ", "DTZ", "EM", "ERA", "EXE", "FBT", "ICN", "INP", "ISC", "NPY", "PD", "PGH", "PIE", "PL", "PT", "PTH", "PYI", "RET", "RSE", "RUF", "SIM", "SLF", "TCH", "TID", "TRY", "UP", "YTT"]
+unfixable = []
 
+[tool.black]
+line-length = 88
