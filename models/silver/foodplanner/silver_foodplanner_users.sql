@@ -1,17 +1,9 @@
-
-
 with source as (
 
-    select * from {{ source('foodplanner_source', 'users') }}
-
-),
-
-renamed as (
-
-    select
-        *
-    from source
+    select * from {{ source('foodplanner', 'users') }}
 
 )
 
-select * from renamed
+
+
+select * from source

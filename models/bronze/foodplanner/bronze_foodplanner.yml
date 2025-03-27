@@ -1,0 +1,173 @@
+version: 2
+sources:
+  - name: foodplanner
+    description: Source foodplanner data
+    database: FOODPLANNER_DB
+    schema: BRONZE
+    tables:
+
+      - name: users
+        description: A list of users
+        columns:
+          - name: customer_id
+            description: Primary key for users
+            tests:
+              - unique
+              - not_null
+
+      - name: dietary_preferences
+        description: A list of user dietary preferences
+        columns:
+          - name: preference_id
+            description: Primary key for preferences
+            tests:
+              - unique
+              - not_null
+          - name: preference_id
+            description: Foreign key linking to users_to_preference table
+            tests:
+              - relationships:
+                  to: source('foodplanner', 'users_to_preferences')
+                  field: preference_id
+
+      
+      - name: users_to_preferences
+        description: A list of user dietary preferences
+        columns:
+          - name: preference_id
+            description: Foreign key linking preferences
+            tests:
+              - not_null
+          - name: customer_id
+            description: Foreign key linking to users
+            tests:
+              - not_null
+              - relationships:
+                  to: source('foodplanner', 'users')
+                  field: customer_id
+
+      - name: subscriptions
+        description: Subscription details for users
+        columns:
+          - name: subscription_id
+            description: Primary key for subscriptions
+            tests:
+              - unique
+              - not_null
+          - name: customer_id
+            description: Foreign key linking to users
+            tests:
+              - relationships:
+                  to: source('foodplanner', 'users')
+                  field: customer_id
+
+      - name: payments
+        description: Payment transactions related to subscriptions
+        columns:
+          - name: payment_id
+            description: Primary key for payments
+            tests:
+              - unique
+              - not_null
+          - name: subscription_id
+            description: Foreign key linking to subscriptions
+            tests:
+              - relationships:
+                  to: source('foodplanner', 'subscriptions')
+                  field: subscription_id
+
+      - name: foodplans
+        description: A list of food plans assigned to users
+        columns:
+          - name: foodplan_id
+            description: Primary key for foodplans
+            tests:
+              - unique
+              - not_null
+          - name: customer_id
+            description: Foreign key linking to users
+            tests:
+              - relationships:
+                  to: source('foodplanner', 'users')
+                  field: customer_id
+          - name: subscription_id
+            description: Foreign key linking to subscriptions
+            tests:
+              - relationships:
+                  to: source('foodplanner', 'subscriptions')
+                  field: subscription_id
+
+      - name: recipes
+        description: A list of recipes
+        columns:
+          - name: recipe_id
+            description: Primary key for recipes
+            tests:
+              - unique
+              - not_null
+
+      - name: foodplan_recipes
+        description: Mapping table for food plans and recipes
+        columns:
+          - name: foodplan_id
+            description: Foreign key linking to foodplans
+            tests:
+              - relationships:
+                  to: source('foodplanner', 'foodplans')
+                  field: foodplan_id
+          - name: recipe_id
+            description: Foreign key linking to recipes
+            tests:
+              - relationships:
+                  to: source('foodplanner', 'recipes')
+                  field: recipe_id
+
+      - name: ingredients
+        description: A list of ingredients used in recipes
+        columns:
+          - name: ingredient_id
+            description: Primary key for ingredients
+            tests:
+              - unique
+              - not_null
+
+      - name: recipe_ingredients
+        description: Mapping table for recipes and ingredients
+        columns:
+          - name: recipe_id
+            description: Foreign key linking to recipes
+            tests:
+              - relationships:
+                  to: source('foodplanner', 'recipes')
+                  field: recipe_id
+          - name: ingredient_id
+            description: Foreign key linking to ingredients
+            tests:
+              - relationships:
+                  to: source('foodplanner', 'ingredients')
+                  field: ingredient_id
+
+      - name: magazines
+        description: List of grocery shop discount magazines
+        columns:
+          - name: magazine_id
+            description: Primary key for retail magazines
+            tests:
+              - unique
+              - not_null
+
+      - name: magazine_ingredients
+        description: Mapping between retail magazines and grocery items
+        columns:
+          - name: magazine_id
+            description: Foreign key linking to retail magazines
+            tests:
+              - relationships:
+                  to: source('foodplanner', 'magazines')
+                  field: magazine_id
+          - name: ingredient_id
+            description: Foreign key linking to ingredients
+            tests:
+              - relationships:
+                  to: source('foodplanner', 'ingredients')
+                  field: ingredient_id

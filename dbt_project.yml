@@ -1,4 +1,4 @@
-name: 'foodplanner'
+name: 'foodplanner_project'
 version: '1.0.0'
 config-version: 2
 
@@ -18,26 +18,16 @@ clean-targets:
     - "dbt_modules"
 
 models:
-  foodplanner_workshop:
-    BRONZE:
-      database: BRONZE
-      raw:
-        schema: FOODPLANNER_RAW
-        materialized: table
-        snowflake_warehouse: pc_dbt_wh
+  foodplanner_project:
     silver:
-      database: SILVER
-      standardized:
-        schema: FOODPLANNER
-        materialized: view
-        snowflake_warehouse: pc_dbt_wh
-    # gold:
-    #   +database: gold
-    #   marts:
-    #     +schema: marts
-    #     +materialized: table
-    #     +snowflake_warehouse: pc_dbt_wh_large
-    # platinum:
-    #   +database: platinum
-    #   +materialized: table
-    #   +snowflake_warehouse: pc_dbt_wh_large
+      foodplanner:
+        +database: FOODPLANNER_DB
+        +schema: SILVER
+        +materialized: view
+        +snowflake_warehouse: pc_dbt_wh
+    gold:
+      +materialized: table
+      customer_service:
+        +database: FOODPLANNER_DB
+        +schema: GOLD
+        +snowflake_warehouse: pc_dbt_wh_large
