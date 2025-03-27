@@ -4,6 +4,6 @@ This project implements a data pipeline for Foodplanner using Snowflake and DBT 
 
 ## Tools Used
 
-- **Snowflake**: A cloud-based data warehousing platform used to store and manage the data.
-- **DBT (Data Build Tool)**: A tool that enables data analysts and engineers to transform data in their warehouse more effectively.
+- **Snowflake**
+- **DBT (Data Build Tool)**
 
