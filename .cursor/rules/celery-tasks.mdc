@@ -1,0 +1,198 @@
+---
+description: Celery task patterns for background job processing
+globs: "**/tasks/*.py,**/celery_app.py"
+alwaysApply: false
+---
+
+# Celery Task Conventions
+
+## Task Definition Pattern
+
+```python
+from celery import shared_task
+from foodplanner.celery_app import celery_app
+
+
+@celery_app.task(
+    bind=True,
+    autoretry_for=(ConnectionError, TimeoutError),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+    acks_late=True,
+)
+def ingest_store_products(self, store_id: str) -> dict:
+    """Ingest products from a single store.
+
+    Args:
+        store_id: The store identifier to scrape.
+
+    Returns:
+        Dict with ingestion statistics.
+    """
+    try:
+        scraper = get_scraper(store_id)
+        products = scraper.scrape_products()
+        saved = upsert_products(products)
+        return {"store_id": store_id, "products_saved": saved}
+    except Exception as exc:
+        self.retry(exc=exc)
+```
+
+## Key Task Parameters
+
+| Parameter | Purpose |
+|-----------|---------|
+| `bind=True` | Access `self` for retries and task info |
+| `autoretry_for` | Exceptions that trigger automatic retry |
+| `retry_backoff=True` | Exponential backoff between retries |
+| `max_retries` | Maximum retry attempts |
+| `acks_late=True` | Acknowledge only after completion (prevents task loss) |
+
+## Task Chaining Pattern
+
+```python
+from celery import chain, group
+
+# Sequential: scrape → normalize → save
+pipeline = chain(
+    scrape_store.s(store_id),
+    normalize_products.s(),
+    save_to_database.s()
+)
+pipeline.apply_async()
+
+# Parallel: scrape multiple stores at once
+parallel_scrape = group(
+    scrape_store.s(store_id) for store_id in store_ids
+)
+parallel_scrape.apply_async()
+```
+
+## Scheduled Tasks (Beat)
+
+```python
+# In celery_app.py
+celery_app.conf.beat_schedule = {
+    "daily-ingestion": {
+        "task": "foodplanner.tasks.ingestion.run_daily_ingestion",
+        "schedule": crontab(hour=6, minute=0),  # 6:00 AM daily
+        "options": {"queue": "ingestion"},
+    },
+    "sync-products-to-graph": {
+        "task": "foodplanner.tasks.graph_ingestion.sync_products_to_graph",
+        "schedule": crontab(hour=7, minute=0),  # After ingestion
+        "options": {"queue": "graph"},
+    },
+}
+```
+
+## Error Handling in Tasks
+
+```python
+from celery.exceptions import MaxRetriesExceededError
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+@celery_app.task(bind=True, max_retries=3)
+def process_recipes(self, recipe_ids: list[str]) -> dict:
+    """Process a batch of recipes."""
+    results = {"success": [], "failed": []}
+
+    for recipe_id in recipe_ids:
+        try:
+            process_single_recipe(recipe_id)
+            results["success"].append(recipe_id)
+        except RecoverableError as exc:
+            logger.warning(f"Retrying recipe {recipe_id}: {exc}")
+            try:
+                self.retry(exc=exc, countdown=60)
+            except MaxRetriesExceededError:
+                results["failed"].append(recipe_id)
+        except PermanentError as exc:
+            logger.error(f"Permanent failure for {recipe_id}: {exc}")
+            results["failed"].append(recipe_id)
+
+    return results
+```
+
+## Task Result Pattern
+
+```python
+from dataclasses import dataclass, asdict
+from datetime import datetime
+
+
+@dataclass
+class IngestionResult:
+    """Result of an ingestion task."""
+    store_id: str
+    products_found: int
+    products_saved: int
+    errors: list[str]
+    started_at: datetime
+    completed_at: datetime
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@celery_app.task(bind=True)
+def ingest_store(self, store_id: str) -> dict:
+    started = datetime.utcnow()
+    # ... do work ...
+    result = IngestionResult(
+        store_id=store_id,
+        products_found=100,
+        products_saved=95,
+        errors=["SKU123: invalid price"],
+        started_at=started,
+        completed_at=datetime.utcnow()
+    )
+    return result.to_dict()  # Celery needs JSON-serializable return
+```
+
+## Testing Celery Tasks
+
+```python
+import pytest
+from unittest.mock import patch, MagicMock
+
+from foodplanner.tasks.ingestion import ingest_store_products
+
+
+class TestIngestionTask:
+    def test_ingest_store_returns_count(self):
+        """Test task returns correct product count."""
+        with patch("foodplanner.tasks.ingestion.get_scraper") as mock_scraper:
+            mock_scraper.return_value.scrape_products.return_value = [
+                MagicMock(), MagicMock()
+            ]
+
+            # Call task synchronously (no Celery worker needed)
+            result = ingest_store_products("rema1000")
+
+            assert result["products_saved"] == 2
+
+    def test_ingest_store_retries_on_connection_error(self):
+        """Test that connection errors trigger retry."""
+        with patch("foodplanner.tasks.ingestion.get_scraper") as mock_scraper:
+            mock_scraper.return_value.scrape_products.side_effect = ConnectionError()
+
+            with pytest.raises(ConnectionError):
+                ingest_store_products("rema1000")
+```
+
+## Running Workers
+
+```bash
+# Development (single worker)
+uv run celery -A foodplanner.celery_app worker --loglevel=info
+
+# With beat scheduler
+uv run celery -A foodplanner.celery_app worker --beat --loglevel=info
+
+# Docker
+docker-compose up celery-worker celery-beat
+```

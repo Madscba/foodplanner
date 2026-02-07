@@ -1,0 +1,223 @@
+---
+description: Web scraping patterns for grocery store data
+globs: "**/scrapers/*.py,**/connectors/*.py"
+alwaysApply: false
+---
+
+# Web Scraping Conventions
+
+## Scraper Base Class Pattern
+
+All scrapers inherit from a common base with shared functionality:
+
+```python
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+
+@dataclass
+class ScrapedProduct:
+    """Standardized product data from any scraper."""
+    name: str
+    price: float
+    ean: str | None = None
+    category: str | None = None
+    image_url: str | None = None
+    discount_price: float | None = None
+
+
+class BaseScraper(ABC):
+    """Base class for all store scrapers."""
+
+    def __init__(self):
+        self._client: httpx.AsyncClient | None = None
+
+    async def __aenter__(self):
+        self._client = httpx.AsyncClient(
+            timeout=30.0,
+            headers={"User-Agent": "FoodplannerBot/1.0"}
+        )
+        return self
+
+    async def __aexit__(self, *args):
+        if self._client:
+            await self._client.aclose()
+
+    @abstractmethod
+    async def scrape_products(self, limit: int | None = None) -> list[ScrapedProduct]:
+        """Scrape products from the store."""
+        ...
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10)
+    )
+    async def get_json(self, url: str) -> dict:
+        """Fetch JSON with automatic retry."""
+        response = await self._client.get(url)
+        response.raise_for_status()
+        return response.json()
+```
+
+## Store-Specific Scraper Pattern
+
+```python
+class Rema1000Scraper(BaseScraper):
+    """Scraper for REMA 1000 grocery store."""
+
+    BASE_URL = "https://api.example.com/rema1000"
+
+    async def scrape_products(self, limit: int | None = None) -> list[ScrapedProduct]:
+        """Scrape products from REMA 1000."""
+        products = []
+        page = 1
+
+        while True:
+            data = await self.get_json(f"{self.BASE_URL}/products?page={page}")
+
+            for item in data.get("products", []):
+                product = self._parse_product(item)
+                if product:
+                    products.append(product)
+
+                if limit and len(products) >= limit:
+                    return products[:limit]
+
+            if not data.get("has_next_page"):
+                break
+            page += 1
+
+        return products
+
+    def _parse_product(self, item: dict) -> ScrapedProduct | None:
+        """Parse API response into ScrapedProduct."""
+        try:
+            return ScrapedProduct(
+                name=item["name"].strip(),
+                price=float(item["price"]),
+                ean=item.get("ean"),
+                category=item.get("category", {}).get("name"),
+                discount_price=self._parse_discount(item),
+            )
+        except (KeyError, ValueError) as e:
+            logger.warning(f"Failed to parse product: {e}")
+            return None
+
+    def _parse_discount(self, item: dict) -> float | None:
+        """Extract discount price if available."""
+        if discount := item.get("discount"):
+            return float(discount.get("price", 0)) or None
+        return None
+```
+
+## Scraper Registry Pattern
+
+```python
+from typing import Type
+
+SCRAPER_REGISTRY: dict[str, Type[BaseScraper]] = {
+    "rema1000": Rema1000Scraper,
+    "netto": NettoScraper,
+    "foetex": FoetexScraper,
+}
+
+
+def get_scraper(store_name: str) -> BaseScraper:
+    """Get scraper instance for a store."""
+    store_key = store_name.lower().replace(" ", "")
+    if store_key not in SCRAPER_REGISTRY:
+        raise ValueError(f"Unknown store: {store_name}")
+    return SCRAPER_REGISTRY[store_key]()
+```
+
+## Error Handling
+
+```python
+from httpx import HTTPStatusError, TimeoutException
+
+
+class ScraperError(Exception):
+    """Base exception for scraper errors."""
+    pass
+
+
+class RateLimitError(ScraperError):
+    """Raised when rate limited by the target site."""
+    pass
+
+
+class ParseError(ScraperError):
+    """Raised when response parsing fails."""
+    pass
+
+
+async def scrape_with_error_handling(scraper: BaseScraper) -> list[ScrapedProduct]:
+    """Scrape with comprehensive error handling."""
+    try:
+        return await scraper.scrape_products()
+    except HTTPStatusError as e:
+        if e.response.status_code == 429:
+            raise RateLimitError("Rate limited, retry later")
+        raise ScraperError(f"HTTP error: {e.response.status_code}")
+    except TimeoutException:
+        raise ScraperError("Request timed out")
+    except Exception as e:
+        logger.exception("Unexpected scraper error")
+        raise ScraperError(f"Scraper failed: {e}")
+```
+
+## API Connector Pattern (MealDB)
+
+```python
+class MealDBConnector:
+    """Connector for TheMealDB recipe API."""
+
+    BASE_URL = "https://www.themealdb.com/api/json/v1/1"
+
+    def __init__(self):
+        self._client: httpx.AsyncClient | None = None
+
+    async def fetch_meal(self, meal_id: str) -> dict | None:
+        """Fetch a single meal by ID."""
+        data = await self._get(f"/lookup.php?i={meal_id}")
+        meals = data.get("meals")
+        return meals[0] if meals else None
+
+    async def search_by_letter(self, letter: str) -> list[dict]:
+        """Search meals starting with a letter."""
+        data = await self._get(f"/search.php?f={letter}")
+        return data.get("meals") or []
+
+    async def fetch_all_meals(self) -> list[dict]:
+        """Fetch all meals by iterating A-Z."""
+        all_meals = []
+        for letter in "abcdefghijklmnopqrstuvwxyz":
+            meals = await self.search_by_letter(letter)
+            all_meals.extend(meals)
+            await asyncio.sleep(0.5)  # Rate limit courtesy
+        return all_meals
+```
+
+## Testing Scrapers
+
+```python
+@pytest.mark.asyncio
+async def test_scraper_handles_empty_response(mock_scraper):
+    """Test graceful handling of empty API response."""
+    with patch.object(mock_scraper, "get_json", AsyncMock(return_value={"products": []})):
+        result = await mock_scraper.scrape_products()
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_scraper_respects_limit(mock_scraper):
+    """Test that limit parameter is respected."""
+    mock_data = {"products": [{"name": f"P{i}", "price": i} for i in range(100)]}
+
+    with patch.object(mock_scraper, "get_json", AsyncMock(return_value=mock_data)):
+        result = await mock_scraper.scrape_products(limit=5)
+
+    assert len(result) == 5
+```

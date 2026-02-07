@@ -1,0 +1,263 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: foodplanner-db
+    environment:
+      POSTGRES_USER: foodplanner
+      POSTGRES_PASSWORD: foodplanner_dev
+      POSTGRES_DB: foodplanner
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foodplanner"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - foodplanner-network
+
+  # Redis for Celery message broker
+  redis:
+    image: redis:7-alpine
+    container_name: foodplanner-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - foodplanner-network
+
+  # FastAPI Backend
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: foodplanner-api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://foodplanner:foodplanner_dev@postgres:5432/foodplanner
+      REDIS_URL: redis://redis:6379/0
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: foodplanner_dev
+      MEALDB_API_KEY: "1"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    volumes:
+      - ./src:/app/src  # Mount source for hot reload in dev
+      - ./tests:/app/tests
+      - ./scripts:/app/scripts
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    command: uvicorn foodplanner.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - foodplanner-network
+    restart: unless-stopped
+
+  # Database Seeder - runs once on startup to populate initial data
+  # This service scrapes REMA 1000 products and loads them into the database
+  seed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: foodplanner-seed
+    environment:
+      DATABASE_URL: postgresql+asyncpg://foodplanner:foodplanner_dev@postgres:5432/foodplanner
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: foodplanner_dev
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Seeding configuration
+      SEED_CATEGORIES: ${SEED_CATEGORIES:-avisvarer,brod-bavinchi,frugt-gront,kod-fisk-fjerkrae,kol,ost-mv,frost,mejeri,kolonial}
+      SEED_LIMIT_PER_CATEGORY: ${SEED_LIMIT_PER_CATEGORY:-100}
+      SEED_SKIP_IF_EXISTS: ${SEED_SKIP_IF_EXISTS:-true}
+      SEED_MIN_PRODUCTS: ${SEED_MIN_PRODUCTS:-100}
+      SEED_SYNC_TO_GRAPH: ${SEED_SYNC_TO_GRAPH:-true}
+    volumes:
+      - ./src:/app/src
+      - ./scripts:/app/scripts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    command: python scripts/seed_database.py
+    networks:
+      - foodplanner-network
+    # Don't restart - this is a one-shot initialization job
+    restart: "no"
+
+  # Celery Worker for background tasks
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: foodplanner-celery-worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://foodplanner:foodplanner_dev@postgres:5432/foodplanner
+      REDIS_URL: redis://redis:6379/0
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: foodplanner_dev
+      MEALDB_API_KEY: "1"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    volumes:
+      - ./src:/app/src
+      - ./scripts:/app/scripts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    command: celery -A foodplanner.celery_app worker --loglevel=info --concurrency=2 -Q ingestion,scraping,graph,celery
+    networks:
+      - foodplanner-network
+    restart: unless-stopped
+
+  # Celery Beat Scheduler for periodic tasks
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: foodplanner-celery-beat
+    environment:
+      DATABASE_URL: postgresql+asyncpg://foodplanner:foodplanner_dev@postgres:5432/foodplanner
+      REDIS_URL: redis://redis:6379/0
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    volumes:
+      - ./src:/app/src
+      - celery_beat_data:/app/celerybeat
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A foodplanner.celery_app beat --loglevel=info --schedule=/app/celerybeat/celerybeat-schedule
+    networks:
+      - foodplanner-network
+    restart: unless-stopped
+
+  # Flower - Celery monitoring (optional, for debugging)
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: foodplanner-flower
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+      - celery-worker
+    command: celery -A foodplanner.celery_app flower --port=5555
+    networks:
+      - foodplanner-network
+    profiles:
+      - monitoring  # Only start with: docker-compose --profile monitoring up
+
+  # Neo4j Graph Database
+  neo4j:
+    image: neo4j:5-community
+    container_name: foodplanner-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/foodplanner_dev
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_memory_heap_initial__size: 512m
+      NEO4J_dbms_memory_heap_max__size: 1G
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    ports:
+      - "7474:7474"  # Browser UI
+      - "7687:7687"  # Bolt protocol
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - foodplanner-network
+    restart: unless-stopped
+
+  # pgAdmin (Optional - for database management)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: foodplanner-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@foodplanner.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - foodplanner-network
+    profiles:
+      - tools  # Only start with: docker-compose --profile tools up
+
+  # React Frontend (Optional - for development)
+  frontend:
+    image: node:20-alpine
+    container_name: foodplanner-frontend
+    working_dir: /app
+    environment:
+      VITE_API_URL: http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    ports:
+      - "3000:3000"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      - api
+    networks:
+      - foodplanner-network
+    profiles:
+      - frontend  # Only start with: docker-compose --profile frontend up
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  neo4j_data:
+    driver: local
+  neo4j_logs:
+    driver: local
+  pgadmin_data:
+    driver: local
+  celery_beat_data:
+    driver: local
+  frontend_node_modules:
+    driver: local
+
+networks:
+  foodplanner-network:
+    driver: bridge

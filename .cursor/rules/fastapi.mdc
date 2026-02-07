@@ -1,0 +1,133 @@
+---
+description: FastAPI endpoint patterns and API conventions
+globs: "**/routers/*.py,**/main.py,**/schemas.py"
+alwaysApply: false
+---
+
+# FastAPI Conventions
+
+## Endpoint Structure
+
+- Use versioned routes: `/api/v1/...`
+- Always include `response_model` in decorators
+- Use dependency injection for database sessions
+- Return Pydantic models, never raw dicts
+
+## Correct Endpoint Pattern
+
+```python
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from foodplanner.database import get_db
+from foodplanner.schemas import RecipeResponse, RecipeCreate
+
+router = APIRouter(prefix="/api/v1/recipes", tags=["recipes"])
+
+
+@router.get("/{recipe_id}", response_model=RecipeResponse)
+async def get_recipe(
+    recipe_id: int,
+    db: AsyncSession = Depends(get_db)
+) -> RecipeResponse:
+    """Get a recipe by ID."""
+    recipe = await db.get(Recipe, recipe_id)
+    if not recipe:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Recipe {recipe_id} not found"
+        )
+    return recipe
+
+
+@router.post("/", response_model=RecipeResponse, status_code=status.HTTP_201_CREATED)
+async def create_recipe(
+    recipe: RecipeCreate,
+    db: AsyncSession = Depends(get_db)
+) -> RecipeResponse:
+    """Create a new recipe."""
+    db_recipe = Recipe(**recipe.model_dump())
+    db.add(db_recipe)
+    await db.commit()
+    await db.refresh(db_recipe)
+    return db_recipe
+```
+
+## Anti-Patterns to Avoid
+
+```python
+# Bad: Missing response_model
+@router.get("/recipes/{recipe_id}")
+async def get_recipe(recipe_id: int):
+    return {"id": recipe_id}  # Unvalidated response!
+
+# Bad: Creating session manually
+@router.get("/recipes")
+async def list_recipes():
+    async with AsyncSession(engine) as session:  # Don't do this!
+        ...
+
+# Bad: Not using HTTPException
+@router.get("/recipes/{recipe_id}")
+async def get_recipe(recipe_id: int, db: AsyncSession = Depends(get_db)):
+    recipe = await db.get(Recipe, recipe_id)
+    if not recipe:
+        return {"error": "Not found"}  # Bad: returns 200 with error body
+```
+
+## Pagination Pattern
+
+```python
+from fastapi import Query
+
+@router.get("/", response_model=list[RecipeResponse])
+async def list_recipes(
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(20, ge=1, le=100, description="Max records to return"),
+    db: AsyncSession = Depends(get_db)
+) -> list[RecipeResponse]:
+    """List recipes with pagination."""
+    result = await db.execute(
+        select(Recipe).offset(skip).limit(limit)
+    )
+    return result.scalars().all()
+```
+
+## Pydantic Schema Conventions
+
+```python
+from pydantic import BaseModel, Field, ConfigDict
+
+
+class RecipeBase(BaseModel):
+    """Base schema with common fields."""
+    name: str = Field(..., min_length=1, max_length=200)
+    instructions: str | None = None
+
+
+class RecipeCreate(RecipeBase):
+    """Schema for creating a recipe."""
+    pass
+
+
+class RecipeResponse(RecipeBase):
+    """Schema for API responses."""
+    id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+```
+
+## Error Responses
+
+Always use appropriate HTTP status codes:
+
+| Status | Use Case |
+|--------|----------|
+| 200 | Successful GET, PUT, PATCH |
+| 201 | Successful POST (created) |
+| 204 | Successful DELETE (no content) |
+| 400 | Invalid request data |
+| 404 | Resource not found |
+| 422 | Validation error (automatic from Pydantic) |
+| 500 | Server error (avoid exposing details) |

@@ -1,0 +1,196 @@
+---
+description: Pytest testing patterns and conventions
+globs: "tests/**/*.py,**/conftest.py"
+alwaysApply: false
+---
+
+# Testing Conventions
+
+## Test Structure
+
+```
+tests/
+├── conftest.py                 # Shared fixtures
+├── test_*.py                   # Unit tests (no external deps)
+└── integration/
+    ├── test_ingestion_pipeline.py
+    └── test_infrastructure.py  # Requires Docker
+```
+
+## Markers
+
+| Marker | Usage | Run Command |
+|--------|-------|-------------|
+| `@pytest.mark.integration` | Needs Docker/network | `pytest -m integration` |
+| `@pytest.mark.slow` | Long-running tests | `pytest -m "not slow"` |
+| (no marker) | Unit tests | `pytest -m "not integration"` |
+
+## Available Fixtures (from conftest.py)
+
+```python
+# Mock data fixtures
+mock_scraped_products         # Sample ScrapedProduct list
+mock_rema1000_store           # Sample store info
+mock_mealdb_meal_response     # MealDB API mock
+mock_mealdb_categories_response
+
+# Database fixtures (integration - requires PostgreSQL)
+test_db_engine    # PostgreSQL test database
+test_session      # Database session
+sample_store      # Pre-created test store
+sample_scraped_products  # Sample scraped product data
+```
+
+## Unit Test Pattern
+
+```python
+import pytest
+from unittest.mock import AsyncMock, patch
+
+from foodplanner.ingest.scrapers import Rema1000Scraper
+
+
+class TestRema1000Scraper:
+    @pytest.fixture
+    def scraper(self):
+        return Rema1000Scraper()
+
+    @pytest.mark.asyncio
+    async def test_parse_product_extracts_name(self, scraper):
+        """Test that product name is correctly extracted."""
+        mock_response = {
+            "products": [{"id": "1", "name": "Æbler", "price": 15.95}]
+        }
+
+        with patch.object(scraper, "get_json", AsyncMock(return_value=mock_response)):
+            result = await scraper.scrape_products()
+
+        assert len(result) == 1
+        assert result[0].name == "Æbler"
+        assert result[0].price == 15.95
+```
+
+## Integration Test Pattern
+
+```python
+import pytest
+
+from foodplanner.ingest.scrapers import Rema1000Scraper
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+class TestRema1000Integration:
+    @pytest.mark.asyncio
+    async def test_real_scraping_returns_products(self):
+        """Integration test with real network request."""
+        scraper = Rema1000Scraper()
+
+        async with scraper:
+            result = await scraper.scrape_products(limit=5)
+
+        assert isinstance(result, list)
+        assert len(result) <= 5
+        assert all(hasattr(p, "name") for p in result)
+```
+
+## Async Test Requirements
+
+Always use `@pytest.mark.asyncio` for async tests:
+
+```python
+# Correct
+@pytest.mark.asyncio
+async def test_async_function():
+    result = await my_async_function()
+    assert result is not None
+
+# Incorrect: Missing marker (will fail silently or hang)
+async def test_async_function():
+    result = await my_async_function()
+```
+
+## Mocking External Services
+
+```python
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+class TestMealDBConnector:
+    @pytest.mark.asyncio
+    async def test_fetch_meal_handles_rate_limit(self):
+        """Test graceful handling of rate limits."""
+        connector = MealDBConnector()
+
+        # Mock rate limit response
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_response.raise_for_status.side_effect = HTTPStatusError(
+            "Rate limited", request=MagicMock(), response=mock_response
+        )
+
+        with patch.object(connector._client, "get", AsyncMock(return_value=mock_response)):
+            with pytest.raises(RateLimitError):
+                await connector.fetch_meal("12345")
+```
+
+## Database Test Pattern
+
+```python
+@pytest.mark.integration
+class TestProductRepository:
+    @pytest.mark.asyncio
+    async def test_upsert_creates_new_product(self, test_session, sample_store):
+        """Test that new products are created correctly."""
+        repo = ProductRepository(test_session)
+
+        product = await repo.upsert(
+            name="Test Product",
+            price=9.99,
+            store_id=sample_store.id
+        )
+
+        assert product.id is not None
+        assert product.name == "Test Product"
+
+    @pytest.mark.asyncio
+    async def test_upsert_updates_existing_product(self, test_session, sample_store):
+        """Test that existing products are updated, not duplicated."""
+        repo = ProductRepository(test_session)
+
+        # Create initial
+        product1 = await repo.upsert(name="Test", price=9.99, store_id=sample_store.id)
+
+        # Upsert same product with new price
+        product2 = await repo.upsert(name="Test", price=12.99, store_id=sample_store.id)
+
+        assert product1.id == product2.id
+        assert product2.price == 12.99
+```
+
+## Running Tests
+
+```bash
+# Unit tests only (fast)
+uv run pytest -m "not integration"
+
+# With coverage
+uv run pytest -m "not integration" --cov=foodplanner --cov-report=html
+
+# Specific file
+uv run pytest tests/test_scrapers.py -v
+
+# Pattern matching
+uv run pytest -k "test_parse_product" -v
+
+# Integration (requires Docker)
+docker-compose up -d
+uv run pytest -m integration -v
+```
+
+## Common Mistakes
+
+1. **Forgetting `@pytest.mark.asyncio`** - async test won't run properly
+2. **Not mocking external APIs** - makes tests slow and flaky
+3. **Missing fixtures** - check conftest.py before creating new mocks
+4. **Broad assertions** - `assert result` is less useful than `assert result.name == "expected"`

@@ -1,0 +1,77 @@
+---
+description: Core project context and architecture for Foodplanner - always active
+globs: "**/*"
+alwaysApply: true
+---
+
+# Foodplanner Project Context
+
+## What This Project Does
+
+Meal planning app that combines recipe data (TheMealDB) with Danish grocery discounts (web scraping). Uses a knowledge graph (Neo4j) to match ingredients to discounted products for cost-effective meal planning.
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| Backend | Python 3.11+, FastAPI, SQLAlchemy 2.0 |
+| Databases | PostgreSQL 16 (relational), Neo4j 5 (knowledge graph) |
+| Task Queue | Celery + Redis |
+| Package Manager | `uv` (NOT pip) |
+| Type Checker | `pyrefly` (NOT mypy) |
+| Linter | `ruff` |
+| Testing | `pytest`, `pytest-asyncio` |
+
+## Essential Commands
+
+```bash
+# Install dependencies (ALWAYS use uv)
+uv sync --extra dev
+
+# Run tests (unit only)
+uv run pytest -m "not integration"
+
+# Run linter
+uv run ruff check .
+
+# Type check
+uv run pyrefly src
+
+# Start dev server
+uv run uvicorn foodplanner.main:app --reload
+
+# Docker (all services)
+docker-compose up -d
+```
+
+## Architecture Principle: Determinism First
+
+- **Daily batch ingestion**: External API calls happen once daily, not in request handlers
+- **Replayable pipelines**: Same inputs always produce same outputs
+- **Explicit seeds**: All random operations use explicit seeds
+- **LLMs as orchestrators**: LLMs select tools, but core logic is rule-based and deterministic
+
+## Module Structure
+
+```
+src/foodplanner/
+├── ingest/         # External data (scrapers, API connectors)
+├── graph/          # Neo4j knowledge graph operations
+├── normalize/      # Transform data to common schemas
+├── plan/           # Meal planning logic
+├── order/          # Shopping cart management
+├── orchestrator/   # LLM-based pipeline orchestration
+├── routers/        # FastAPI endpoints
+├── tasks/          # Celery background tasks
+├── models.py       # SQLAlchemy models
+├── schemas.py      # Pydantic schemas
+└── database.py     # Database configuration
+```
+
+## AI Hints
+
+- NEVER use `pip install` - always use `uv sync` or `uv add`
+- NEVER create new database sessions manually - use `Depends(get_db)`
+- ALWAYS run `uv run ruff check` before suggesting commits
+- ALWAYS check existing patterns in the codebase before creating new ones
+- Reference docs with @docs/pipeline.md, @docs/graph-database.md, @docs/testing.md

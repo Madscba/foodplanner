@@ -1,0 +1,137 @@
+---
+description: Python coding conventions and style guidelines
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Python Style Guide
+
+## General Rules
+
+- **Line length**: 100 characters (configured in pyproject.toml)
+- **Type hints**: Required for all function signatures
+- **Imports**: Sorted by ruff (stdlib → third-party → local)
+- **Async**: Use `async`/`await` for all I/O-bound operations
+
+## Type Hints (Required)
+
+```python
+# Correct: Full type hints
+def calculate_discount(price: float, percentage: int) -> float:
+    return price * (1 - percentage / 100)
+
+async def fetch_products(store_id: str) -> list[Product]:
+    ...
+
+# Incorrect: Missing hints
+def calculate_discount(price, percentage):  # Bad
+    return price * (1 - percentage / 100)
+```
+
+## Error Handling
+
+```python
+# Correct: Specific exceptions with context
+from foodplanner.exceptions import ProductNotFoundError
+
+async def get_product(product_id: str) -> Product:
+    product = await db.get(Product, product_id)
+    if not product:
+        raise ProductNotFoundError(f"Product {product_id} not found")
+    return product
+
+# Incorrect: Bare except or generic Exception
+try:
+    result = await risky_operation()
+except:  # Bad: catches everything including KeyboardInterrupt
+    pass
+
+except Exception as e:  # Bad: too broad
+    logger.error(e)
+```
+
+## Logging
+
+Use Python's standard `logging` module with structured context:
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Correct: Structured logging with context
+logger.info(
+    "Product ingested",
+    extra={"product_id": product.id, "store": store.name, "price": product.price}
+)
+
+# Correct log levels:
+logger.debug("Internal state details")      # Debugging only
+logger.info("Pipeline milestone reached")   # Normal operations
+logger.warning("Rate limit approaching")    # Recoverable issues
+logger.error("Failed to save product")      # Failures
+```
+
+## Docstrings
+
+Use Google-style docstrings for public functions:
+
+```python
+async def match_ingredient_to_products(
+    ingredient_name: str,
+    threshold: float = 0.7
+) -> list[ProductMatch]:
+    """Find products matching an ingredient name.
+
+    Uses fuzzy matching with rapidfuzz to find products that
+    match the given ingredient within the confidence threshold.
+
+    Args:
+        ingredient_name: The ingredient to search for.
+        threshold: Minimum confidence score (0.0-1.0).
+
+    Returns:
+        List of ProductMatch objects sorted by confidence.
+
+    Raises:
+        ValueError: If threshold is not between 0 and 1.
+    """
+    ...
+```
+
+## Prefer Explicit Over Implicit
+
+```python
+# Correct: Explicit is better
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from foodplanner.models import Product
+
+def process_items(items: list[dict[str, Any]]) -> list[Product]:
+    return [Product(**item) for item in items]
+
+# Incorrect: Magic and implicit behavior
+def process_items(items):  # What type? What's returned?
+    return [Product(**i) for i in items]
+```
+
+## Environment Variables
+
+```python
+# Correct: Validate on startup with pydantic-settings
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    database_url: str
+    redis_url: str
+    neo4j_uri: str
+    neo4j_password: str  # Never log this
+
+    class Config:
+        env_file = ".env"
+
+# Incorrect: Direct os.getenv without validation
+import os
+DATABASE_URL = os.getenv("DATABASE_URL")  # Could be None!
+```

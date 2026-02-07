@@ -1,0 +1,208 @@
+---
+description: Docker and container patterns for the Foodplanner stack
+globs: "**/Dockerfile,**/docker-compose.yml,**/.dockerignore"
+alwaysApply: false
+---
+
+# Docker Conventions
+
+## Service Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    docker-compose.yml                        │
+├─────────────┬─────────────┬─────────────┬──────────────────┤
+│   api       │  postgres   │   neo4j     │     redis        │
+│  (FastAPI)  │  (DB)       │  (Graph)    │    (Queue)       │
+├─────────────┼─────────────┴─────────────┴──────────────────┤
+│ celery-     │              celery-beat                      │
+│ worker      │              (Scheduler)                      │
+└─────────────┴──────────────────────────────────────────────┘
+```
+
+## Docker Compose Service Pattern
+
+```yaml
+services:
+  api:
+    build: .
+    container_name: foodplanner-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://foodplanner:foodplanner_dev@postgres:5432/foodplanner
+      - REDIS_URL=redis://redis:6379/0
+      - NEO4J_URI=bolt://neo4j:7687
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: foodplanner-db
+    environment:
+      POSTGRES_USER: foodplanner
+      POSTGRES_PASSWORD: foodplanner_dev
+      POSTGRES_DB: foodplanner
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foodplanner"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: foodplanner-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/foodplanner_dev
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "7474:7474"  # Browser UI
+      - "7687:7687"  # Bolt protocol
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s  # Neo4j takes longer to start
+
+  redis:
+    image: redis:7-alpine
+    container_name: foodplanner-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  neo4j_data:
+```
+
+## Dockerfile Best Practices
+
+```dockerfile
+# Use specific version, not :latest
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_CACHE_DIR=/root/.cache/uv
+
+WORKDIR /app
+
+# Install uv for fast dependency management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Copy dependency files first (layer caching)
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies (cached layer)
+RUN uv sync --frozen --no-dev
+
+# Copy application code
+COPY src/ src/
+
+# Run as non-root user
+RUN useradd --create-home appuser
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Start application
+CMD ["uv", "run", "uvicorn", "foodplanner.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+## Common Operations
+
+```bash
+# Build images
+docker-compose build
+
+# Start all services
+docker-compose up -d
+
+# Start with specific profile (e.g., pgAdmin)
+docker-compose --profile tools up -d
+
+# View logs
+docker-compose logs -f api
+docker-compose logs -f celery-worker
+
+# Shell into container
+docker-compose exec api bash
+
+# Run tests in container
+docker-compose exec api uv run pytest
+
+# Rebuild single service
+docker-compose up -d --build api
+
+# Clean up everything
+docker-compose down -v --remove-orphans
+```
+
+## Health Check Patterns
+
+Always include health checks for dependent services:
+
+```yaml
+# API waits for healthy dependencies
+depends_on:
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  neo4j:
+    condition: service_healthy
+```
+
+## Environment Variables
+
+Use `.env` file (never commit):
+
+```bash
+# .env
+DATABASE_URL=postgresql+asyncpg://foodplanner:foodplanner_dev@localhost:5432/foodplanner
+REDIS_URL=redis://localhost:6379/0
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=foodplanner_dev
+```
+
+Reference in docker-compose:
+
+```yaml
+services:
+  api:
+    env_file:
+      - .env
+```
+
+## Troubleshooting
+
+| Issue | Command |
+|-------|---------|
+| Container won't start | `docker-compose logs <service>` |
+| Port already in use | `docker ps` then `docker stop <container>` |
+| Need fresh start | `docker-compose down -v && docker-compose up -d` |
+| Neo4j slow to start | Wait 30s+ or check `docker-compose logs neo4j` |
+| Database connection refused | Check `docker-compose ps` for health status |
