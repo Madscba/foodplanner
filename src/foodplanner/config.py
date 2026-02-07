@@ -1,4 +1,8 @@
-"""Application configuration using pydantic-settings."""
+"""Application configuration using pydantic-settings.
+
+All sensitive settings (passwords, API keys) MUST be provided via environment
+variables or a .env file.  See .env.example for the required variables.
+"""
 
 from functools import lru_cache
 
@@ -14,19 +18,19 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Database
+    # Database -- no credentials in the default; require DATABASE_URL from env
     database_url: str = "postgresql+asyncpg://localhost/foodplanner"
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
-    # Neo4j Graph Database
+    # Neo4j Graph Database -- password MUST come from env / .env
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
-    neo4j_password: str = "foodplanner_dev"
+    neo4j_password: str = ""  # Required: set NEO4J_PASSWORD in .env
 
     # External APIs
-    mealdb_api_key: str = "1"  # Default test key
+    mealdb_api_key: str = "1"  # TheMealDB free-tier test key
     mealdb_base_url: str = "https://www.themealdb.com/api/json/v1"
 
     # Web Scraping (basic)

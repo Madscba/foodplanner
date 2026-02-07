@@ -209,11 +209,13 @@ async def add_user_store_preference(
     # Ensure user exists (create placeholder if not)
     user_result = await db.execute(select(User).where(User.id == user_id))
     if not user_result.scalar_one_or_none():
+        import secrets
+
         # Create placeholder user - in production, this would come from auth
         user = User(
             id=user_id,
             email=f"{user_id}@placeholder.local",
-            hashed_password="placeholder",
+            hashed_password=secrets.token_hex(32),  # random unusable hash
         )
         db.add(user)
 

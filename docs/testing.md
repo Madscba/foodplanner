@@ -321,7 +321,7 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: foodplanner
-          POSTGRES_PASSWORD: foodplanner_dev
+          POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD }}  # pragma: allowlist secret
           POSTGRES_DB: foodplanner
         ports:
           - 5432:5432
@@ -342,7 +342,7 @@ jobs:
       neo4j:
         image: neo4j:5-community
         env:
-          NEO4J_AUTH: neo4j/foodplanner_dev
+          NEO4J_AUTH: neo4j/${{ secrets.CI_NEO4J_PASSWORD }}
         ports:
           - 7687:7687
     steps:
@@ -351,11 +351,11 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run pytest tests/integration/test_infrastructure.py -v -m integration
         env:
-          DATABASE_URL: postgresql+asyncpg://foodplanner:foodplanner_dev@localhost:5432/foodplanner
+          DATABASE_URL: postgresql+asyncpg://foodplanner:${{ secrets.CI_POSTGRES_PASSWORD }}@localhost:5432/foodplanner  # pragma: allowlist secret
           REDIS_URL: redis://localhost:6379/0
           NEO4J_URI: bolt://localhost:7687
           NEO4J_USER: neo4j
-          NEO4J_PASSWORD: foodplanner_dev
+          NEO4J_PASSWORD: ${{ secrets.CI_NEO4J_PASSWORD }}
 ```
 
 ## Test Coverage Goals

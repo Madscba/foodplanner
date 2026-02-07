@@ -26,11 +26,11 @@ class TestPostgreSQLConnectivity:
 
     @pytest.fixture
     def database_url(self):
-        """Get database URL from environment or use default."""
-        return os.getenv(
-            "DATABASE_URL",
-            "postgresql+asyncpg://foodplanner:foodplanner_dev@localhost:5432/foodplanner",
-        )
+        """Get database URL from environment (required)."""
+        url = os.getenv("DATABASE_URL", "")
+        if not url:
+            pytest.skip("DATABASE_URL not set -- provide credentials via .env")
+        return url
 
     @pytest.fixture
     def sync_database_url(self, database_url):
@@ -531,10 +531,10 @@ class TestSystemHealthCheck:
 
         # Test PostgreSQL
         try:
-            db_url = os.getenv(
-                "DATABASE_URL",
-                "postgresql://foodplanner:foodplanner_dev@localhost:5432/foodplanner",
-            ).replace("+asyncpg", "")
+            db_url = os.getenv("DATABASE_URL", "")
+            if not db_url:
+                results["postgresql_error"] = "DATABASE_URL not set"
+            db_url = db_url.replace("+asyncpg", "")
             engine = create_engine(db_url, echo=False)
             with Session(engine) as session:
                 session.execute(text("SELECT 1"))

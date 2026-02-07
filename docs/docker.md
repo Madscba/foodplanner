@@ -74,9 +74,9 @@ graph LR
 **Access**:
 - Host: `localhost:5432` (from host machine)
 - Host: `postgres:5432` (from other containers)
-- User: `foodplanner`
-- Password: `foodplanner_dev`
-- Database: `foodplanner`
+- User: `foodplanner` (configurable via `POSTGRES_USER`)
+- Password: set via `POSTGRES_PASSWORD` in `.env`
+- Database: `foodplanner` (configurable via `POSTGRES_DB`)
 
 **Data persistence**: Stored in Docker volume `postgres_data`
 
@@ -113,8 +113,8 @@ docker-compose exec scheduler python -m foodplanner.ingest.batch_ingest
 **Purpose**: Database management UI
 
 **Access**: http://localhost:5050
-- Email: `admin@foodplanner.local`
-- Password: `admin`
+- Email: configurable via `PGADMIN_EMAIL` in `.env`
+- Password: set via `PGADMIN_PASSWORD` in `.env`
 
 **Start with**:
 ```bash
@@ -292,11 +292,11 @@ The current `docker-compose.yml` is optimized for development. For production:
 
 ### Security
 
-- [ ] Change default passwords
+- [x] All passwords read from environment / `.env` (no hardcoded defaults)
 - [ ] Use secrets management (Docker secrets, Vault)
 - [ ] Remove debug/reload flags
 - [ ] Enable HTTPS
-- [ ] Set proper CORS origins
+- [x] CORS restricted to explicit methods and headers
 
 ### Scheduler
 
@@ -358,20 +358,15 @@ backup:
 
 ## Environment Variables
 
-All services read from `.env` file in project root:
+All services read from `.env` file in project root.  Copy `.env.example` to
+`.env` and fill in the required values:
 
 ```bash
-# Database
-DATABASE_URL=postgresql+asyncpg://foodplanner:foodplanner_dev@postgres:5432/foodplanner
-
-# APIs
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-
-# Application
-DEBUG=true
-LOG_LEVEL=INFO
+cp .env.example .env
+# Then edit .env and set your passwords
 ```
+
+See `.env.example` for the full list of variables.
 
 **Important**: Never commit `.env` to version control!
 

@@ -155,10 +155,12 @@ async def get_or_create_user(db: AsyncSession, user_id: str) -> User:
     user = result.scalar_one_or_none()
 
     if not user:
+        import secrets
+
         user = User(
             id=user_id,
             email=f"{user_id}@placeholder.local",
-            hashed_password="placeholder",
+            hashed_password=secrets.token_hex(32),  # random unusable hash
         )
         db.add(user)
         await db.flush()

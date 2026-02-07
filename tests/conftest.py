@@ -286,15 +286,22 @@ def sample_products():
 
 
 def get_test_database_url() -> str:
-    """Get the test database URL from environment or use default.
+    """Get the test database URL from environment.
 
     Uses a separate test database to avoid conflicts with development data.
-    Default uses the standard development PostgreSQL with a _test suffix.
+    Set TEST_DATABASE_URL in your .env or environment, e.g.:
+      TEST_DATABASE_URL=postgresql://foodplanner:<password>@localhost:5432/foodplanner_test
     """
-    return os.environ.get(
-        "TEST_DATABASE_URL",
-        "postgresql://foodplanner:foodplanner_dev@localhost:5432/foodplanner_test",
-    )
+    url = os.environ.get("TEST_DATABASE_URL", "")
+    if not url:
+        # Build from individual env vars (same creds as docker-compose)
+        user = os.environ.get("POSTGRES_USER", "foodplanner")
+        password = os.environ.get("POSTGRES_PASSWORD", "")
+        host = os.environ.get("POSTGRES_HOST", "localhost")
+        port = os.environ.get("POSTGRES_PORT", "5432")
+        db = os.environ.get("POSTGRES_DB", "foodplanner")
+        url = f"postgresql://{user}:{password}@{host}:{port}/{db}_test"
+    return url
 
 
 @pytest.fixture(scope="function")
